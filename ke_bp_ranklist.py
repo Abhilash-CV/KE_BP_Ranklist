@@ -273,24 +273,45 @@ if norm_file and cand_file and cbt_file:
         # ==================================================
         # EXCEPTION REPORTS
         # ==================================================
-        mask = (
-        (~rejection_df["Category"]
-            .fillna("")
-            .astype(str)
-            .str.upper()
-            .isin(["SC", "ST"]))
-        &
-        (
-            rejection_df["Norm_Score"]
-            .fillna(0)
-            < 10
+        
+        # Create rejection_df for exception reports
+        rejection_df = cand_df.copy()
+        rejection_df["Reason"] = ""
+        
+        # Add reasons for rejection
+        rejection_df.loc[
+            ~rejection_df["RollNo"].isin(norm_df["RollNo"]),
+            "Reason"
+        ] += "Missing Normalized Score; "
+        
+        rejection_df.loc[
+            ~rejection_df["RollNo"].isin(cbt_df["RollNo"]),
+            "Reason"
+        ] += "Missing CBT Responses; "
+        
+        rejection_df.loc[
+            rejection_df["DOB_Parsed"].isna(),
+            "Reason"
+        ] += "Invalid DOB; "
+        
+        # Add condition for normalized score below 10 (for non-SC/ST)
+        # First, merge norm scores
+        rejection_df = rejection_df.merge(
+            norm_df[["RollNo", "Norm_Score"]],
+            on="RollNo",
+            how="left"
         )
-    )
-    
-    rejection_df.loc[
-        mask,
-        "Reason"
-    ] += "Normalized Score Below 10; "
+        
+        mask = (
+            (~rejection_df["BPharm"].fillna("").str.upper().isin(["SC", "ST"])) &
+            (rejection_df["Norm_Score"].fillna(0) < 10)
+        )
+        
+        rejection_df.loc[
+            mask,
+            "Reason"
+        ] += "Normalized Score Below 10; "
+        
         with st.expander(
             "View Validation Errors"
         ):
@@ -395,9 +416,7 @@ if norm_file and cand_file and cbt_file:
         rank_df = (
             eligible_df
             .merge(
-                norm_df[
-                    ["RollNo", "Norm_Score"]
-                ],
+                norm_df[["RollNo", "Norm_Score"]],
                 on="RollNo",
                 how="inner"
             )
@@ -412,14 +431,6 @@ if norm_file and cand_file and cbt_file:
                 how="left"
             )
         )
-        rank_df = (
-            eligible_df
-            .merge(
-                norm_df[["RollNo", "Norm_Score"]],
-                on="RollNo",
-                how="inner"
-            )
-        )
 
         # Numeric columns only
         numeric_cols = [
@@ -429,6 +440,11 @@ if norm_file and cand_file and cbt_file:
             "Chem_Correct",
             "Phy_Correct"
         ]
+        
+        # Check if Category column exists, if not create it
+        if "Category" not in rank_df.columns:
+            rank_df["Category"] = ""
+        
         rank_df["Category"] = (
             rank_df["Category"]
             .fillna("")
@@ -446,13 +462,10 @@ if norm_file and cand_file and cbt_file:
             True,
             rank_df["Norm_Score"] >= 10
         )
-
         
         for col in numeric_cols:
             if col in rank_df.columns:
                 rank_df[col] = rank_df[col].fillna(0)
-        
-        
         
         # ==================================================
         # SORTING AS PER PROSPECTUS
@@ -476,6 +489,7 @@ if norm_file and cand_file and cbt_file:
                 True
             ]
         )
+        
         below_min_score = rank_df[
             rank_df["MinScoreEligible"] == False
         ]
@@ -483,6 +497,7 @@ if norm_file and cand_file and cbt_file:
         rank_df = rank_df[
             rank_df["MinScoreEligible"] == True
         ]
+        
         # ==================================================
         # GENERATE BRANK
         # ==================================================
@@ -511,8 +526,11 @@ if norm_file and cand_file and cbt_file:
             "Phy_Correct"
         ]
 
+        # Ensure all columns exist
+        available_columns = [col for col in final_columns if col in rank_df.columns]
+        
         st.dataframe(
-            rank_df[final_columns],
+            rank_df[available_columns],
             use_container_width=True,
             height=600
         )
@@ -521,7 +539,7 @@ if norm_file and cand_file and cbt_file:
         # STATISTICS
         # ==================================================
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         col1.metric(
             "Total Candidates",
@@ -537,10 +555,12 @@ if norm_file and cand_file and cbt_file:
             "Rejected Candidates",
             len(cand_df) - len(rank_df)
         )
-        st.metric(
+        
+        col4.metric(
             "Below Minimum Score",
             len(below_min_score)
         )
+        
         # ==================================================
         # DOWNLOAD
         # ==================================================
@@ -548,7 +568,7 @@ if norm_file and cand_file and cbt_file:
         st.download_button(
             label="Download B.Pharm Rank List",
             data=rank_df[
-                final_columns
+                available_columns
             ].to_csv(index=False),
             file_name="BPHARM_RANKLIST.csv",
             mime="text/csv"
@@ -558,29 +578,31 @@ if norm_file and cand_file and cbt_file:
         # SQL UPDATE FILE
         # ==================================================
 
-        sql_df = rank_df[
-            ["ApplNo", "BRank"]
-        ]
+        if "ApplNo" in rank_df.columns and "BRank" in rank_df.columns:
+            sql_df = rank_df[
+                ["ApplNo", "BRank"]
+            ]
 
-        sql_lines = []
+            sql_lines = []
 
-        for _, row in sql_df.iterrows():
+            for _, row in sql_df.iterrows():
 
-            sql_lines.append(
-                f"UPDATE candidates "
-                f"SET BRank={int(row['BRank'])} "
-                f"WHERE ApplNo='{row['ApplNo']}';"
+                sql_lines.append(
+                    f"UPDATE candidates "
+                    f"SET BRank={int(row['BRank'])} "
+                    f"WHERE ApplNo='{row['ApplNo']}';"
+                )
+
+            sql_text = "\n".join(sql_lines)
+
+            st.download_button(
+                label="Download BRank Update SQL",
+                data=sql_text,
+                file_name="Update_BRank.sql",
+                mime="text/plain"
             )
-
-        sql_text = "\n".join(sql_lines)
-
-        st.download_button(
-            label="Download BRank Update SQL",
-            data=sql_text,
-            file_name="Update_BRank.sql",
-            mime="text/plain"
-        )
 
     except Exception as e:
 
-        st.error(str(e))
+        st.error(f"An error occurred: {str(e)}")
+        st.exception(e)

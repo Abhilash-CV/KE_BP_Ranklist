@@ -273,7 +273,24 @@ if norm_file and cand_file and cbt_file:
         # ==================================================
         # EXCEPTION REPORTS
         # ==================================================
-
+        mask = (
+        (~rejection_df["Category"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .isin(["SC", "ST"]))
+        &
+        (
+            rejection_df["Norm_Score"]
+            .fillna(0)
+            < 10
+        )
+    )
+    
+    rejection_df.loc[
+        mask,
+        "Reason"
+    ] += "Normalized Score Below 10; "
         with st.expander(
             "View Validation Errors"
         ):
@@ -395,6 +412,14 @@ if norm_file and cand_file and cbt_file:
                 how="left"
             )
         )
+        rank_df = (
+            eligible_df
+            .merge(
+                norm_df[["RollNo", "Norm_Score"]],
+                on="RollNo",
+                how="inner"
+            )
+        )
 
         # Numeric columns only
         numeric_cols = [
@@ -404,11 +429,31 @@ if norm_file and cand_file and cbt_file:
             "Chem_Correct",
             "Phy_Correct"
         ]
+        rank_df["Category"] = (
+            rank_df["Category"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+        )
+        
+        rank_df["Norm_Score"] = pd.to_numeric(
+            rank_df["Norm_Score"],
+            errors="coerce"
+        ).fillna(0)
+        
+        rank_df["MinScoreEligible"] = np.where(
+            rank_df["Category"].isin(["SC", "ST"]),
+            True,
+            rank_df["Norm_Score"] >= 10
+        )
+
         
         for col in numeric_cols:
             if col in rank_df.columns:
                 rank_df[col] = rank_df[col].fillna(0)
-
+        
+        
+        
         # ==================================================
         # SORTING AS PER PROSPECTUS
         # ==================================================
@@ -431,7 +476,13 @@ if norm_file and cand_file and cbt_file:
                 True
             ]
         )
-
+        below_min_score = rank_df[
+            rank_df["MinScoreEligible"] == False
+        ]
+        
+        rank_df = rank_df[
+            rank_df["MinScoreEligible"] == True
+        ]
         # ==================================================
         # GENERATE BRANK
         # ==================================================
@@ -486,7 +537,10 @@ if norm_file and cand_file and cbt_file:
             "Rejected Candidates",
             len(cand_df) - len(rank_df)
         )
-
+        st.metric(
+            "Below Minimum Score",
+            len(below_min_score)
+        )
         # ==================================================
         # DOWNLOAD
         # ==================================================

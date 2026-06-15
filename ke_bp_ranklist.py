@@ -396,7 +396,18 @@ if norm_file and cand_file and cbt_file:
             )
         )
 
-        rank_df.fillna(0, inplace=True)
+        # Numeric columns only
+        numeric_cols = [
+            "Norm_Score",
+            "Chem_Score",
+            "Phy_Score",
+            "Chem_Correct",
+            "Phy_Correct"
+        ]
+        
+        for col in numeric_cols:
+            if col in rank_df.columns:
+                rank_df[col] = rank_df[col].fillna(0)
 
         # ==================================================
         # SORTING AS PER PROSPECTUS

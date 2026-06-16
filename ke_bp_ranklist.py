@@ -310,13 +310,13 @@ if norm_file and cand_file and cbt_file:
         
         mask = (
             (~rejection_df["Category"].fillna("").str.upper().isin(["SC", "ST"])) &
-            (rejection_df["Norm_Score"].fillna(0) <= 5)
+            (rejection_df["Norm_Score"].fillna(0) <= 10)
         )
         
         rejection_df.loc[
             mask,
             "Reason"
-        ] += "Normalized Score <= 5; "
+        ] += "Normalized Score <= 10; "
         
         with st.expander(
             "View Validation Errors"
@@ -467,7 +467,7 @@ if norm_file and cand_file and cbt_file:
         rank_df["MinScoreEligible"] = np.where(
             rank_df["Category"].isin(["SC", "ST"]),
             True,
-            rank_df["Norm_Score"] > 5
+            rank_df["Norm_Score"] >= 10
         )
         
         for col in numeric_cols:
@@ -566,7 +566,7 @@ if norm_file and cand_file and cbt_file:
         )
         
         col4.metric(
-            "Below Minimum Score (≤5)",
+            "Below Minimum Score (≤10)",
             len(below_min_score)
         )
         

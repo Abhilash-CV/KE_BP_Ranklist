@@ -25,6 +25,8 @@ Tie Breaking Order:
 4. Chemistry Correct Responses
 5. Physics Correct Responses
 6. Older Candidate (DOB)
+
+**Note:** Candidates with Normalized Score ≤ 5 are rejected (except SC/ST categories)
 """)
 
 # ======================================================
@@ -294,7 +296,7 @@ if norm_file and cand_file and cbt_file:
             "Reason"
         ] += "Invalid DOB; "
         
-        # Add condition for normalized score below 10 (for non-SC/ST)
+        # Add condition for normalized score <= 5 (for non-SC/ST)
         # First, merge norm scores
         rejection_df = rejection_df.merge(
             norm_df[["RollNo", "Norm_Score"]],
@@ -302,15 +304,19 @@ if norm_file and cand_file and cbt_file:
             how="left"
         )
         
+        # Check if Category column exists, if not create it
+        if "Category" not in rejection_df.columns:
+            rejection_df["Category"] = ""
+        
         mask = (
-            (~rejection_df["BPharm"].fillna("").str.upper().isin(["SC", "ST"])) &
-            (rejection_df["Norm_Score"].fillna(0) < 10)
+            (~rejection_df["Category"].fillna("").str.upper().isin(["SC", "ST"])) &
+            (rejection_df["Norm_Score"].fillna(0) <= 5)
         )
         
         rejection_df.loc[
             mask,
             "Reason"
-        ] += "Normalized Score Below 10; "
+        ] += "Normalized Score <= 5; "
         
         with st.expander(
             "View Validation Errors"
@@ -441,7 +447,7 @@ if norm_file and cand_file and cbt_file:
             "Phy_Correct"
         ]
         
-        # Check if Category column exists, if not create it
+        # Ensure Category column exists
         if "Category" not in rank_df.columns:
             rank_df["Category"] = ""
         
@@ -457,10 +463,11 @@ if norm_file and cand_file and cbt_file:
             errors="coerce"
         ).fillna(0)
         
+        # Minimum score eligibility (≤5 rejected for non-SC/ST)
         rank_df["MinScoreEligible"] = np.where(
             rank_df["Category"].isin(["SC", "ST"]),
             True,
-            rank_df["Norm_Score"] >= 10
+            rank_df["Norm_Score"] > 5
         )
         
         for col in numeric_cols:
@@ -513,12 +520,14 @@ if norm_file and cand_file and cbt_file:
 
         st.header("Rank List")
 
+        # UPDATED: Added Category to final columns
         final_columns = [
             "BRank",
             "ApplNo",
             "RollNo",
             "Name",
             "DOB",
+            "Category",
             "Norm_Score",
             "Chem_Score",
             "Phy_Score",
@@ -557,22 +566,79 @@ if norm_file and cand_file and cbt_file:
         )
         
         col4.metric(
-            "Below Minimum Score",
+            "Below Minimum Score (≤5)",
             len(below_min_score)
         )
         
+        # Category-wise statistics
+        st.subheader("Category-wise Statistics")
+        if "Category" in rank_df.columns:
+            category_stats = rank_df["Category"].value_counts().reset_index()
+            category_stats.columns = ["Category", "Count"]
+            st.dataframe(category_stats, use_container_width=True)
+        
         # ==================================================
-        # DOWNLOAD
+        # DOWNLOAD - CSV
         # ==================================================
 
-        st.download_button(
-            label="Download B.Pharm Rank List",
-            data=rank_df[
-                available_columns
-            ].to_csv(index=False),
-            file_name="BPHARM_RANKLIST.csv",
-            mime="text/csv"
-        )
+        st.subheader("Download Options")
+        
+        col_csv, col_excel = st.columns(2)
+        
+        with col_csv:
+            st.download_button(
+                label="Download B.Pharm Rank List (CSV)",
+                data=rank_df[
+                    available_columns
+                ].to_csv(index=False),
+                file_name="BPHARM_RANKLIST.csv",
+                mime="text/csv"
+            )
+        
+        with col_excel:
+            # Create Excel file with multiple sheets
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Main rank list sheet with Category column
+                rank_df[available_columns].to_excel(
+                    writer, 
+                    sheet_name='BPharm_Rank_List', 
+                    index=False
+                )
+                
+                # Category statistics sheet
+                if "Category" in rank_df.columns:
+                    category_stats = rank_df["Category"].value_counts().reset_index()
+                    category_stats.columns = ["Category", "Count"]
+                    category_stats.to_excel(
+                        writer, 
+                        sheet_name='Category_Statistics', 
+                        index=False
+                    )
+                
+                # Below minimum score candidates sheet
+                if len(below_min_score) > 0:
+                    below_min_score[available_columns].to_excel(
+                        writer, 
+                        sheet_name='Below_Min_Score', 
+                        index=False
+                    )
+                
+                # Validation summary sheet
+                summary_df.to_excel(
+                    writer, 
+                    sheet_name='Validation_Summary', 
+                    index=False
+                )
+            
+            output.seek(0)
+            
+            st.download_button(
+                label="Download B.Pharm Rank List (Excel)",
+                data=output,
+                file_name="BPHARM_RANKLIST.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
         # ==================================================
         # SQL UPDATE FILE
